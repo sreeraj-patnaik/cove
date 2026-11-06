@@ -1,119 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Copy, LogOut, Plus, Send, Settings, Trash2, UserPlus, Users, X } from 'lucide-react';
-import { authenticate, savedSession, updateProfile, type Session } from './auth';
-import { createGroup, deleteGroup, joinGroup, listGroups, type Group } from './groups';
-import { loadMessages, removeDemoData, saveMessage, setting, saveSetting, type StoredMessage } from './storage';
+import { ArrowLeft, ChevronRight, Copy, Plus, Send, Settings, UserPlus, Users, X } from 'lucide-react';
+import { authenticate, savedSession, type Session } from './auth';
+import { createGroup, joinGroup, listGroups, type Group } from './groups';
+import { loadMessages, removeDemoData, saveMessage, setting, type StoredMessage } from './storage';
 import { useRoom } from './realtime';
 
-
-function UpdateNotification() {
-    const [updateReady, setUpdateReady] = useState(false);
-    const [refreshing, setRefreshing] = useState(false);
-  
-    useEffect(() => {
-      if (!('serviceWorker' in navigator)) return;
-  
-      let registration: ServiceWorkerRegistration | undefined;
-  
-      const ready = () => setUpdateReady(true);
-  
-      const controllerChanged = () => {
-        if (refreshing) {
-          window.location.reload();
-        }
-      };
-  
-      const checkRegistration = async () => {
-        registration = await navigator.serviceWorker.getRegistration();
-  
-        if (registration?.waiting && navigator.serviceWorker.controller) {
-          setUpdateReady(true);
-        }
-      };
-  
-      window.addEventListener('cove-update-ready', ready);
-      navigator.serviceWorker.addEventListener(
-        'controllerchange',
-        controllerChanged
-      );
-  
-      void checkRegistration();
-  
-      return () => {
-        window.removeEventListener('cove-update-ready', ready);
-        navigator.serviceWorker.removeEventListener(
-          'controllerchange',
-          controllerChanged
-        );
-      };
-    }, [refreshing]);
-  
-    const applyUpdate = async () => {
-      const registration = await navigator.serviceWorker.getRegistration();
-  
-      if (!registration?.waiting) {
-        setUpdateReady(false);
-        return;
-      }
-  
-      setRefreshing(true);
-      registration.waiting.postMessage({ type: 'SKIP_WAITING' });
-    };
-  
-    if (!updateReady) return null;
-  
-    return (
-      <div className="update-banner" role="status">
-        <div>
-          <strong>A little closer, a little newer.</strong>
-          <p>
-            {refreshing
-              ? 'Updating COVE...'
-              : 'A new version of COVE is ready.'}
-          </p>
-        </div>
-  
-        {!refreshing && (
-          <>
-            <button onClick={() => void applyUpdate()}>
-              Refresh COVE
-            </button>
-  
-            <button
-              onClick={() => setUpdateReady(false)}
-              aria-label="Dismiss update notification"
-            >
-              Later
-            </button>
-          </>
-        )}
-      </div>
-    );
-  }
-
-  export function App() {
-    const [session, setSession] = useState<Session | null>(savedSession);
-  
-    return (
-      <>
-        <UpdateNotification />
-  
-        {session ? (
-          <Cove
-            session={session}
-            signOut={() => {
-              sessionStorage.removeItem('cove-session');
-              setSession(null);
-            }}
-          />
-        ) : (
-          <Auth onSuccess={setSession} />
-        )}
-      </>
-    );
-  }
-function Auth({ onSuccess }: { onSuccess: (s: Session) => void }) { const [register, setRegister] = useState(false); const [name, setName] = useState(''); const [username, setUsername] = useState(''); const [password, setPassword] = useState(''); const [error, setError] = useState(''); const submit = async (e: React.FormEvent) => { e.preventDefault(); try { setError(''); onSuccess(await authenticate(register ? 'register' : 'login', { displayName: name, username, password })); } catch (x) { setError(x instanceof Error ? x.message : 'Unable to sign in.'); } }; return <main className="auth-shell"><form className="auth-card" onSubmit={submit}><p className="eyebrow">COVE</p><h1>A little closer.</h1><p className="auth-copy">A private world for your closest friends.</p>{register && <label>Display name<input value={name} onChange={e => setName(e.target.value)} required/></label>}<label>Username<input value={username} onChange={e => setUsername(e.target.value.toLowerCase())} required/></label><label>Password<input type="password" minLength={12} value={password} onChange={e => setPassword(e.target.value)} required/></label>{error && <p className="auth-error">{error}</p>}<button className="primary">{register ? 'Create account' : 'Sign in'}</button><button type="button" className="text-button" onClick={() => setRegister(!register)}>{register ? 'Already a member? Sign in' : 'New here? Create an account'}</button></form></main>; }
-function Cove({ session, signOut }: { session: Session; signOut: () => void }) { const [groups, setGroups] = useState<Group[]>([]); const [active, setActive] = useState<Group | null>(null); const [messages, setMessages] = useState<StoredMessage[]>([]); const [code, setCode] = useState(''); const [draft, setDraft] = useState(''); const [modal, setModal] = useState<'create'|'join'|'profile'|null>(null); const [notice, setNotice] = useState(''); const refresh = useCallback(async () => { try { const d = await listGroups(session); setGroups(d.groups); setActive(a => a && d.groups.find(g => g.id === a.id) || d.groups[0] || null); } catch (x) { setNotice(x instanceof Error ? x.message : 'Could not load groups.'); } }, [session]); useEffect(() => { void removeDemoData().then(refresh); }, [refresh]); useEffect(() => { if (!active) return; void loadMessages(active.id).then(setMessages); void setting(`group-code:${active.id}`, '').then(setCode); }, [active]); const receive = useCallback((m: StoredMessage) => { setMessages(x => x.some(i => i.id === m.id) ? x : [...x, m]); void saveMessage(m); }, []); const delivered = useCallback((id: string) => setMessages(x => x.map(m => m.id === Number(id) ? { ...m, state: 'Delivered' } : m)), []); const room = useRoom(session, active?.id || '', code, receive, delivered); const send = async () => { if (!active || !draft.trim()) return; if (!code) return setNotice('Set a private group code in Group settings first.'); const m: StoredMessage = { id: Date.now(), conversationId: active.id, from: 'me', text: draft.trim(), time: new Date().toLocaleTimeString([], { hour:'numeric',minute:'2-digit' }), state:'Queued' }; setMessages(x => [...x,m]); void saveMessage(m); setDraft(''); if (await room.send(m.text,String(m.id))) { const n={...m,state:'Relayed' as const}; setMessages(x=>x.map(i=>i.id===m.id?n:i)); void saveMessage(n); } }; const create=async(n:string)=>{const {group}=await createGroup(session,n);await refresh();setActive(group);setModal(null);}; const join=async(c:string)=>{const {group}=await joinGroup(session,c);await refresh();setActive(group);setModal(null);}; const remove=async()=>{if(!active||!confirm(`Delete ${active.name}?`))return;await deleteGroup(session,active.id);await refresh();}; return <main className="product"><aside className="groups"><div className="brand">cove</div><button onClick={()=>setModal('profile')} className="me">{session.user.displayName[0]}</button><div className="group-list">{groups.map(g=><button key={g.id} onClick={()=>setActive(g)} className={active?.id===g.id?'group active':'group'}><Users size={17}/><span>{g.name}</span></button>)}</div><button className="round" onClick={()=>setModal('create')}><Plus/></button><button className="round" onClick={()=>setModal('join')}><UserPlus/></button></aside><section className="panel">{active?<><header className="panel-head"><div><p className="eyebrow">PRIVATE GROUP</p><h1>{active.name}</h1><small className={room.status}>{room.status==='connected'?'● Live':'○ Offline'}</small></div><button className="icon" onClick={()=>setModal('profile')}><Settings/></button></header><div className="invite"><span>Invite code: <b>{active.inviteCode}</b></span><button onClick={()=>void navigator.clipboard.writeText(active.inviteCode).then(()=>setNotice('Invite code copied.'))}><Copy size={15}/> Copy</button></div><div className="message-list">{messages.length===0?<div className="empty"><h2>Your group is ready.</h2><p>Share the invite code, then set the same private group code with your friends.</p></div>:messages.map(m=><article className={`message ${m.from}`} key={m.id}><p>{m.text}</p><small>{m.time} · {m.state||''}</small></article>)}</div><form className="composer" onSubmit={e=>{e.preventDefault();void send();}}><input value={draft} onChange={e=>setDraft(e.target.value)} placeholder={`Message ${active.name}`}/><button className="primary"><Send size={18}/></button></form></>:<div className="empty big"><h1>Create or join a group</h1><p>There are no groups in your account yet.</p><button className="primary" onClick={()=>setModal('create')}>Create your first group</button></div>}</section>{modal&&<Modal close={()=>setModal(null)}>{modal==='create'&&<GroupForm title="Create a group" action="Create group" onSubmit={create}/>} {modal==='join'&&<GroupForm title="Join with an invite code" action="Join group" onSubmit={join}/>} {modal==='profile'&&<Profile session={session} code={code} setCode={v=>{setCode(v);if(active)void saveSetting(`group-code:${active.id}`,v);}} remove={active?remove:undefined} signOut={signOut}/>}</Modal>}{notice&&<div className="toast">{notice}<button onClick={()=>setNotice('')}><X size={14}/></button></div>}</main>; }
-function GroupForm({title,action,onSubmit}:{title:string;action:string;onSubmit:(v:string)=>Promise<void>}){const[v,setV]=useState('');const[e,setE]=useState('');return <form className="modal-card" onSubmit={async x=>{x.preventDefault();try{await onSubmit(v)}catch(r){setE(r instanceof Error?r.message:'Request failed.')}}}><h2>{title}</h2><input autoFocus value={v} onChange={x=>setV(x.target.value)} placeholder={action==='Join group'?'Invite code':'Group name'} required/>{e&&<p className="auth-error">{e}</p>}<button className="primary">{action}</button></form>}
-function Profile({session,code:_code,setCode:_setCode,remove:_remove,signOut}:{session:Session;code:string;setCode:(v:string)=>void;remove?:()=>Promise<void>;signOut:()=>void}){const[name,setName]=useState(session.user.displayName);const[avatar,setAvatar]=useState(session.user.avatar||'');const[error,setError]=useState('');const pick=(file:File)=>{const reader=new FileReader();reader.onload=()=>{const image=new Image();image.onload=()=>{const canvas=document.createElement('canvas');const size=160;canvas.width=size;canvas.height=size;const ctx=canvas.getContext('2d');if(!ctx)return;const source=Math.min(image.width,image.height);ctx.drawImage(image,(image.width-source)/2,(image.height-source)/2,source,source,0,0,size,size);setAvatar(canvas.toDataURL('image/jpeg',.82));};image.src=String(reader.result);};reader.readAsDataURL(file)};const save=async()=>{try{setError('');await updateProfile(session,name,avatar||undefined);location.reload()}catch(x){setError(x instanceof Error?x.message:'Could not save profile.')}};return <div className="modal-card profile-card-global"><div className="profile-avatar">{avatar?<img src={avatar} alt="Profile"/>:name.slice(0,1).toUpperCase()}</div><p className="eyebrow">YOUR ACCOUNT</p><h2>{name}</h2><p>@{session.user.username}</p><label>Profile photo<input className="file-input" type="file" accept="image/*" onChange={e=>e.target.files?.[0]&&pick(e.target.files[0])}/></label><label>Display name<input value={name} onChange={e=>setName(e.target.value)} maxLength={48}/></label>{error&&<p className="auth-error">{error}</p>}<button className="primary" onClick={()=>void save()}>Save profile</button><small>Account settings apply everywhere. Group membership and invitations belong to each group’s details.</small><button className="text-button signout" onClick={signOut}><LogOut size={16}/>Sign out</button></div>}
+export function App(){const[s,setS]=useState<Session|null>(savedSession);return s?<Cove session={s}/>:<Auth done={setS}/>}
+function Auth({done}:{done:(s:Session)=>void}){const[up,setUp]=useState(false),[n,setN]=useState(''),[u,setU]=useState(''),[p,setP]=useState(''),[e,setE]=useState('');return <main className="auth-shell"><form className="auth-card" onSubmit={async x=>{x.preventDefault();try{done(await authenticate(up?'register':'login',{displayName:n,username:u,password:p}))}catch(z){setE(z instanceof Error?z.message:'Sign in failed')}}}><p className="eyebrow">COVE</p><h1>A little closer.</h1>{up&&<input placeholder="Display name" value={n} onChange={x=>setN(x.target.value)} required/>}<input placeholder="Username" value={u} onChange={x=>setU(x.target.value)} required/><input placeholder="Password" type="password" value={p} onChange={x=>setP(x.target.value)} required minLength={12}/>{e&&<p className="auth-error">{e}</p>}<button className="primary">{up?'Create account':'Sign in'}</button><button type="button" className="text-button" onClick={()=>setUp(!up)}>{up?'Sign in instead':'Create account'}</button></form></main>}
+function Cove({session}:{session:Session}){const[g,setG]=useState<Group[]>([]),[a,setA]=useState<Group|null>(null),[mobile,setMobile]=useState(innerWidth<=900),[screen,setScreen]=useState<'list'|'chat'>('list'),[modal,setModal]=useState<'create'|'join'|'account'|'group'|null>(null);const refresh=useCallback(async()=>{const d=await listGroups(session);setG(d.groups);setA(x=>x&&d.groups.find(i=>i.id===x.id)||d.groups[0]||null)},[session]);useEffect(()=>{void removeDemoData().then(refresh);const f=()=>setMobile(innerWidth<=900);addEventListener('resize',f);return()=>removeEventListener('resize',f)},[refresh]);const open=(x:Group)=>{setA(x);if(mobile)setScreen('chat')};return <main className={`cove-shell ${mobile?'mobile':''} ${screen}`}><aside className="group-page"><header><b>cove</b><button className="avatar-button" onClick={()=>setModal('account')}>{session.user.displayName[0]}</button></header><h2>Your groups</h2><p className="muted">Private spaces you belong to</p><div className="group-cards">{g.map(x=><button className="group-card" onClick={()=>open(x)} key={x.id}><span className="group-icon"><Users size={18}/></span><span><strong>{x.name}</strong><small>Private group · tap to open</small></span><ChevronRight size={18}/></button>)}</div><div className="group-actions"><button className="primary" onClick={()=>setModal('create')}><Plus size={18}/>Create group</button><button className="outline" onClick={()=>setModal('join')}><UserPlus size={18}/>Join group</button></div></aside>{a&&<Chat group={a} session={session} back={()=>setScreen('list')} mobile={mobile} details={()=>setModal('group')}/>} {modal&&<Modal close={()=>setModal(null)}>{modal==='create'&&<Form title="Create group" placeholder="Group name" submit={async v=>{const r=await createGroup(session,v);await refresh();setA(r.group);setModal(null);if(mobile)setScreen('chat')}}/>}{modal==='join'&&<Form title="Join a group" placeholder="Invite code" submit={async v=>{const r=await joinGroup(session,v);await refresh();setA(r.group);setModal(null);if(mobile)setScreen('chat')}}/>}{modal==='account'&&<section className="sheet"><h2>Your profile</h2><div className="big-avatar">{session.user.displayName[0]}</div><h3>{session.user.displayName}</h3><p>@{session.user.username}</p><hr/><button className="outline" onClick={()=>{sessionStorage.clear();location.reload()}}>Sign out</button></section>}{modal==='group'&&<section className="sheet"><p className="eyebrow">GROUP DETAILS</p><h2>{a?.name}</h2><p>Private group</p><hr/><b>Invite members</b><p>Share this code with friends:</p><code>{a?.inviteCode}</code><button className="primary" onClick={()=>a&&navigator.clipboard.writeText(a.inviteCode)}>Copy invite code</button><hr/><b>Members</b><p className="muted">Member list is shown after friends join. Group-owner moderation is kept in this group details page—not your account profile.</p></section>}</Modal>}</main>}
+function Chat({group,session,back,mobile,details}:{group:Group;session:Session;back:()=>void;mobile:boolean;details:()=>void}){const[m,setM]=useState<StoredMessage[]>([]),[d,setD]=useState(''),[code,setCode]=useState('');useEffect(()=>{void loadMessages(group.id).then(setM);void setting(`group-code:${group.id}`,group.id).then(setCode)},[group]);const got=useCallback((x:StoredMessage)=>{setM(y=>y.some(i=>i.id===x.id)?y:[...y,x]);void saveMessage(x)},[]);const delivered=useCallback((id:string)=>setM(x=>x.map(i=>i.id===Number(id)?{...i,state:'Delivered'}:i)),[]);const room=useRoom(session,group.id,code,got,delivered);const send=async()=>{if(!d.trim())return;const x:StoredMessage={id:Date.now(),conversationId:group.id,from:'me',text:d,time:new Date().toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}),state:'Queued'};setM(y=>[...y,x]);void saveMessage(x);setD('');if(await room.send(x.text,String(x.id)))setM(y=>y.map(i=>i.id===x.id?{...i,state:'Relayed'}:i))};return <section className="chat-page"><header className="chat-head">{mobile&&<button className="icon" onClick={back}><ArrowLeft/></button>}<div><p className="eyebrow">PRIVATE GROUP</p><h1>{group.name}</h1><small className={room.status}>{room.status==='connected'?'● Live':'○ Offline'}</small></div><button className="icon" onClick={details}><Settings/></button></header><div className="invite-strip">Invite code <b>{group.inviteCode}</b><button onClick={()=>navigator.clipboard.writeText(group.inviteCode)}><Copy size={15}/></button></div><div className="messages">{m.length===0?<div className="empty"><h2>No messages yet</h2><p>Invite your friends from Group details, then start the conversation.</p></div>:m.map(x=><article className={`message ${x.from}`} key={x.id}><p>{x.text}</p><small>{x.time} · {x.state}</small></article>)}</div><form className="composer" onSubmit={x=>{x.preventDefault();void send()}}><input value={d} onChange={x=>setD(x.target.value)} placeholder={`Message ${group.name}`}/><button className="primary"><Send size={18}/></button></form></section>}
+function Form({title,placeholder,submit}:{title:string;placeholder:string;submit:(v:string)=>Promise<void>}){const[v,setV]=useState(''),[e,setE]=useState('');return <form className="sheet" onSubmit={async x=>{x.preventDefault();try{await submit(v)}catch(z){setE(z instanceof Error?z.message:'Failed')}}}><h2>{title}</h2><input autoFocus value={v} onChange={x=>setV(x.target.value)} placeholder={placeholder} required/>{e&&<p className="auth-error">{e}</p>}<button className="primary">Continue</button></form>}
 function Modal({children,close}:{children:React.ReactNode;close:()=>void}){return <div className="modal-backdrop"><button className="modal-close" onClick={close}><X/></button>{children}</div>}
