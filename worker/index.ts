@@ -54,7 +54,9 @@ export class SignalRoom {
     for (const peer of this.state.getWebSockets()) if (peer !== socket) peer.send(envelope);
   }
 
-  webSocketClose(socket: WebSocket, code: number, reason: string): void { socket.close(code, reason); }
+  webSocketClose(_socket: WebSocket, _code: number, _reason: string): void {
+  // The socket is already closed. Do not call close() again.
+}
   webSocketError(socket: WebSocket): void { socket.close(1011, 'Socket error'); }
 }
 
