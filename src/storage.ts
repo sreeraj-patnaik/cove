@@ -1,6 +1,6 @@
 import Dexie, { type EntityTable } from 'dexie';
 
-export type StoredMessage = { id: number; conversationId: string; from: 'me' | 'them'; text: string; time: string; state?: 'Queued' | 'Relayed' | 'Delivered'; replyTo?: string; reactions?: string[] };
+export type StoredMessage = { id: number; conversationId: string; from: 'me' | 'them'; text: string; time: string; senderName?: string; state?: 'Queued' | 'Relayed' | 'Delivered'; replyTo?: string; reactions?: string[] };
 export type StoredSetting = { key: string; value: string };
 
 const db = new Dexie('cove') as Dexie & { messages: EntityTable<StoredMessage, 'id'>; settings: EntityTable<StoredSetting, 'key'> };
