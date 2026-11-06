@@ -15,7 +15,12 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname === '/api/health') return json({ ok: true, service: 'cove-coordination', persistence: 'none' });
-    if (url.pathname.startsWith('/api/auth/')) return env.AUTH_SERVICE.getByName('accounts').fetch(request);
+    if (
+      url.pathname.startsWith('/api/auth/') ||
+      url.pathname.startsWith('/api/admin/')
+    ) {
+      return env.AUTH_SERVICE.getByName('accounts').fetch(request);
+    }
     if (url.pathname === '/api/socket') {
       if (request.headers.get('Upgrade') !== 'websocket') return json({ error: 'WebSocket upgrade required.' }, 426);
       const room = roomName(url.searchParams.get('room'));
