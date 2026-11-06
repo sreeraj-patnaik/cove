@@ -17,7 +17,10 @@ export default {
     if (url.pathname === '/api/health') return json({ ok: true, service: 'cove-coordination', persistence: 'none' });
     if (
       url.pathname.startsWith('/api/auth/') ||
-      url.pathname.startsWith('/api/admin/')
+      url.pathname.startsWith('/api/admin/') ||
+      url.pathname.startsWith('/api/groups') ||
+      url.pathname === '/api/profile' ||
+      url.pathname === '/api/password'
     ) {
       return env.AUTH_SERVICE.getByName('accounts').fetch(request);
     }
@@ -66,6 +69,7 @@ export class SignalRoom {
 }
 
 type Account = { id: string; username: string; displayName: string; salt: string; verifier: string; createdAt: number };
+type Group = { id: string; name: string; ownerId: string; inviteCode: string; createdAt: number };
 type Credentials = { username?: unknown; password?: unknown; displayName?: unknown };
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -96,6 +100,15 @@ export class AuthService {
     const url = new URL(request.url);
     const claims = await verifiedSession(request.headers.get('authorization')?.replace(/^Bearer\s+/i, '') || '', this.env.AUTH_SECRET);
     const admin = claims?.username === this.env.ADMIN_USERNAME;
+    if (url.pathname === '/api/profile' && request.method === 'PATCH') { if (!claims) return reply({ error: 'Authenticated session required.' }, 401); const input = await request.json() as { displayName?: string }; const displayName = typeof input.displayName === 'string' ? input.displayName.trim().slice(0, 48) : ''; if (!displayName) return reply({ error: 'A display name is required.' }, 400); const account = await this.state.storage.get<Account>(`account:${claims.username}`); if (!account) return reply({ error: 'Account not found.' }, 404); await this.state.storage.put(`account:${claims.username}`, { ...account, displayName }); return reply({ user: { id: account.id, username: account.username, displayName, admin } }); }
+    if (url.pathname === '/api/password' && request.method === 'POST') { if (!claims) return reply({ error: 'Authenticated session required.' }, 401); const input = await request.json() as { currentPassword?: string; newPassword?: string }; const account = await this.state.storage.get<Account>(`account:${claims.username}`); if (!account || typeof input.currentPassword !== 'string' || typeof input.newPassword !== 'string') return reply({ error: 'Invalid password request.' }, 400); if (input.newPassword.length < 12 || await passwordVerifier(input.currentPassword, account.salt, this.env.AUTH_SECRET) !== account.verifier) return reply({ error: 'Current password is incorrect, or the new password is too short.' }, 400); const salt = encoded(crypto.getRandomValues(new Uint8Array(16)).buffer); await this.state.storage.put(`account:${claims.username}`, { ...account, salt, verifier: await passwordVerifier(input.newPassword, salt, this.env.AUTH_SECRET) }); return reply({ ok: true }); }
+    if (url.pathname === '/api/groups') {
+      if (!claims) return reply({ error: 'Authenticated session required.' }, 401);
+      if (request.method === 'GET') { const memberships = await this.state.storage.list<string>({ prefix: `member:${claims.sub}:` }); const groups = await Promise.all([...memberships.values()].map(id => this.state.storage.get<Group>(`group:${id}`))); return reply({ groups: groups.filter((group): group is Group => Boolean(group)) }); }
+      if (request.method === 'POST') { const input = await request.json() as { name?: string }; const name = typeof input.name === 'string' ? input.name.trim().slice(0, 48) : ''; if (!name) return reply({ error: 'A group name is required.' }, 400); const group: Group = { id: crypto.randomUUID(), name, ownerId: claims.sub, inviteCode: crypto.randomUUID().replaceAll('-', '').slice(0, 10).toUpperCase(), createdAt: Date.now() }; await this.state.storage.put(`group:${group.id}`, group); await this.state.storage.put(`invite:${group.inviteCode}`, group.id); await this.state.storage.put(`member:${claims.sub}:${group.id}`, group.id); await this.state.storage.put(`membership:${group.id}:${claims.sub}`, claims.sub); return reply({ group }, 201); }
+    }
+    if (url.pathname === '/api/groups/join' && request.method === 'POST') { if (!claims) return reply({ error: 'Authenticated session required.' }, 401); const input = await request.json() as { code?: string }; const code = typeof input.code === 'string' ? input.code.trim().toUpperCase() : ''; const id = await this.state.storage.get<string>(`invite:${code}`); const group = id && await this.state.storage.get<Group>(`group:${id}`); if (!group) return reply({ error: 'Invite code not found.' }, 404); await this.state.storage.put(`member:${claims.sub}:${group.id}`, group.id); await this.state.storage.put(`membership:${group.id}:${claims.sub}`, claims.sub); return reply({ group }); }
+    if (url.pathname.startsWith('/api/groups/') && request.method === 'DELETE') { if (!claims) return reply({ error: 'Authenticated session required.' }, 401); const id = url.pathname.split('/').at(-1) || ''; const group = await this.state.storage.get<Group>(`group:${id}`); if (!group) return reply({ error: 'Group not found.' }, 404); if (group.ownerId !== claims.sub) return reply({ error: 'Only the group owner can delete it.' }, 403); const members = await this.state.storage.list<string>({ prefix: `membership:${id}:` }); await Promise.all([...members.values()].flatMap(user => [this.state.storage.delete(`member:${user}:${id}`), this.state.storage.delete(`membership:${id}:${user}`)])); await this.state.storage.delete(`group:${id}`); await this.state.storage.delete(`invite:${group.inviteCode}`); return reply({ ok: true }); }
     if (url.pathname === '/api/auth/verify') return claims ? reply({ user: { id: claims.sub, username: claims.username, displayName: claims.displayName, admin } }) : reply({ error: 'Invalid session.' }, 401);
     if (url.pathname === '/api/admin/users') { if (!admin) return reply({ error: 'Administrator access required.' }, 403); const records = await this.state.storage.list<Account>({ prefix: 'account:' }); return reply({ users: [...records.values()].map(account => ({ id: account.id, username: account.username, displayName: account.displayName, createdAt: account.createdAt })) }); }
     if (url.pathname === '/api/admin/reset-password' || url.pathname === '/api/admin/delete-user') {

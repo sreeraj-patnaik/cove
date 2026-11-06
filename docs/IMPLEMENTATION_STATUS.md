@@ -1,11 +1,23 @@
 # COVE implementation status
 
-**Last updated:** 6 November 2026 (implementation pass 7)  
+**Last updated:** 6 November 2026 (implementation pass 8)  
 **Source of truth:** `agent_guide.md`
 
 This file is updated at the end of every implementation pass. Percentages measure the approved product requirements, not merely visible screens.
 
 ## Pass log
+
+### Pass 8 — Functional group API repair
+
+**Completed**
+
+- Corrected Worker routing for group endpoints; group creation, join, listing and deletion requests now reach the Durable Object instead of static assets.
+- Added robust client-side handling for malformed/non-JSON server responses.
+- Added authenticated profile display-name and password-update backend endpoints.
+
+**Remaining UI work**
+
+- The profile screen must still be expanded to expose the new display-name/password endpoints, avatar upload and richer account details. These server capabilities are present but not yet surfaced in the simplified profile panel.
 
 ### Pass 7 — Administrator APIs and frosted visual pass
 

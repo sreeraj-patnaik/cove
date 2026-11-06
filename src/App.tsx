@@ -1,44 +1,119 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Bell, Check, ChevronLeft, Compass, Feather, Flower2, Heart, Image, Lock, Mic, MoreHorizontal, Palette, Plus, Reply, Search, Send, Settings, Smile, Sparkles, Users, X } from 'lucide-react';
-import { loadMessages, saveMessage, saveSetting, seedMessages, setting, type StoredMessage } from './storage';
+import { useCallback, useEffect, useState } from 'react';
+import { Copy, LogOut, Plus, Send, Settings, Trash2, UserPlus, Users, X } from 'lucide-react';
 import { authenticate, savedSession, type Session } from './auth';
+import { createGroup, deleteGroup, joinGroup, listGroups, type Group } from './groups';
+import { loadMessages, removeDemoData, saveMessage, setting, saveSetting, type StoredMessage } from './storage';
 import { useRoom } from './realtime';
 
-type Tab = 'home' | 'chats' | 'moments' | 'memories' | 'profile';
-type Message = StoredMessage;
-const seed: Message[] = [
-  { id: 1, conversationId: 'night-owls', from: 'them', text: 'The sky is unreal tonight. Meet by the water?', time: '8:14 PM' },
-  { id: 2, conversationId: 'night-owls', from: 'me', text: 'Already packing a blanket ✨', time: '8:16 PM', state: 'Queued' },
-];
-const chats = [{ name: 'The Night Owls', initials: 'NO', color: '#7866b9', preview: 'Already packing a blanket ✨', time: '8:16 PM', count: 2 }, { name: 'Maya Chen', initials: 'MC', color: '#5273a8', preview: 'That little café on 6th?', time: '6:42 PM', count: 0 }, { name: 'Weekend Plans', initials: 'WP', color: '#5e9a8c', preview: 'Arjun shared a photo', time: 'Yesterday', count: 0 }];
 
-function Avatar({ initials, color, size = '' }: { initials: string; color: string; size?: string }) { return <span className={`avatar ${size}`} style={{ background: color }}>{initials}</span>; }
-function IconButton({ label, children, onClick }: { label: string; children: React.ReactNode; onClick?: () => void }) { return <button className="icon-button" aria-label={label} onClick={onClick}>{children}</button>; }
+function UpdateNotification() {
+    const [updateReady, setUpdateReady] = useState(false);
+    const [refreshing, setRefreshing] = useState(false);
+  
+    useEffect(() => {
+      if (!('serviceWorker' in navigator)) return;
+  
+      let registration: ServiceWorkerRegistration | undefined;
+  
+      const ready = () => setUpdateReady(true);
+  
+      const controllerChanged = () => {
+        if (refreshing) {
+          window.location.reload();
+        }
+      };
+  
+      const checkRegistration = async () => {
+        registration = await navigator.serviceWorker.getRegistration();
+  
+        if (registration?.waiting && navigator.serviceWorker.controller) {
+          setUpdateReady(true);
+        }
+      };
+  
+      window.addEventListener('cove-update-ready', ready);
+      navigator.serviceWorker.addEventListener(
+        'controllerchange',
+        controllerChanged
+      );
+  
+      void checkRegistration();
+  
+      return () => {
+        window.removeEventListener('cove-update-ready', ready);
+        navigator.serviceWorker.removeEventListener(
+          'controllerchange',
+          controllerChanged
+        );
+      };
+    }, [refreshing]);
+  
+    const applyUpdate = async () => {
+      const registration = await navigator.serviceWorker.getRegistration();
+  
+      if (!registration?.waiting) {
+        setUpdateReady(false);
+        return;
+      }
+  
+      setRefreshing(true);
+      registration.waiting.postMessage({ type: 'SKIP_WAITING' });
+    };
+  
+    if (!updateReady) return null;
+  
+    return (
+      <div className="update-banner" role="status">
+        <div>
+          <strong>A little closer, a little newer.</strong>
+          <p>
+            {refreshing
+              ? 'Updating COVE...'
+              : 'A new version of COVE is ready.'}
+          </p>
+        </div>
+  
+        {!refreshing && (
+          <>
+            <button onClick={() => void applyUpdate()}>
+              Refresh COVE
+            </button>
+  
+            <button
+              onClick={() => setUpdateReady(false)}
+              aria-label="Dismiss update notification"
+            >
+              Later
+            </button>
+          </>
+        )}
+      </div>
+    );
+  }
 
-export function App() {
-  const [session, setSession] = useState<Session | null>(savedSession);
-  if (!session) return <AuthScreen onAuthenticated={setSession}/>;
-  return <CoveApp session={session}/>;
-}
-
-function CoveApp({ session }: { session: Session }) {
-  const [tab, setTab] = useState<Tab>('home'); const [activeChat, setActiveChat] = useState(true); const [messages, setMessages] = useState<Message[]>(seed); const [draft, setDraft] = useState(''); const [toast, setToast] = useState(''); const [echoAnswer, setEchoAnswer] = useState(''); const [echoSent, setEchoSent] = useState(false); const [capsule, setCapsule] = useState(false); const [settingsOpen, setSettingsOpen] = useState(false); const [accent, setAccent] = useState('#a792e5'); const [receipts, setReceipts] = useState(true); const [groupCode, setGroupCode] = useState('');
-  useEffect(() => { void seedMessages(seed).then(setMessages); void setting('accent', '#a792e5').then(setAccent); void setting('receipts', 'true').then(value => setReceipts(value === 'true')); void setting('group-passphrase', '').then(setGroupCode); }, []);
-  useEffect(() => { if (!toast) return; const id = setTimeout(() => setToast(''), 2400); return () => clearTimeout(id); }, [toast]);
-  const receive = useCallback((message: Message) => { setMessages(previous => previous.some(item => item.id === message.id) ? previous : [...previous, message]); void saveMessage(message); }, []);
-  const delivered = useCallback((id: string) => { const numericId = Number(id); setMessages(previous => previous.map(message => { if (message.id !== numericId) return message; const next = { ...message, state: 'Delivered' as const }; void saveMessage(next); return next; })); }, []);
-  const room = useRoom(session, groupCode, receive, delivered);
-  const send = async () => { const text = draft.trim(); if (!text) return; if (!groupCode) { setSettingsOpen(true); setToast('Set the shared group code before sending.'); return; } const message = { id: Date.now(), conversationId: 'night-owls', from: 'me' as const, text, time: new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }), state: 'Queued' as const }; setMessages(prev => [...prev, message]); void saveMessage(message); setDraft(''); if (await room.send(text, String(message.id))) { const relayed = { ...message, state: 'Relayed' as const }; setMessages(previous => previous.map(item => item.id === message.id ? relayed : item)); void saveMessage(relayed); } else setToast('Saved locally. It will send the next time your app connects.'); };
-  useEffect(() => { if (room.status !== 'connected') return; for (const message of messages.filter(item => item.from === 'me' && item.state === 'Queued')) void room.send(message.text, String(message.id)).then(sent => { if (!sent) return; const relayed = { ...message, state: 'Relayed' as const }; setMessages(previous => previous.map(item => item.id === message.id ? relayed : item)); void saveMessage(relayed); }); }, [room.status, messages, room]);
-  const reactTo = (id: number) => setMessages(prev => prev.map(message => { if (message.id !== id) return message; const next = { ...message, reactions: message.reactions?.includes('♡') ? [] : ['♡'] }; void saveMessage(next); return next; }));
-  const title = useMemo(() => ({ home: 'Good evening, Sree', chats: 'Chats', moments: 'Moments', memories: 'Memories', profile: 'Your profile' })[tab], [tab]);
-  return <main className="app-shell" style={{ '--accent': accent } as React.CSSProperties}><aside className="rail"><div className="wordmark">cove<span>•</span></div><nav>{([['home', Flower2], ['chats', Feather], ['moments', Sparkles], ['memories', Heart], ['profile', Users]] as const).map(([id, I]) => <button key={id} className={tab === id ? 'nav-active' : ''} aria-label={id} onClick={() => { setTab(id); setActiveChat(false); }}><I size={20}/><span>{id}</span></button>)}</nav><button className="nav-settings" aria-label="Settings" onClick={() => setSettingsOpen(true)}><Settings size={20}/></button></aside><section className="sidebar"><header><div><p className="eyebrow">COVE</p><h1>{title}</h1></div><IconButton label="Notifications" onClick={() => setToast('No new notifications.')}><Bell size={19}/></IconButton></header><div className="search"><Search size={17}/><input aria-label="Search" placeholder="Search your space"/></div>{tab === 'home' || tab === 'chats' ? <ChatList open={() => setActiveChat(true)} /> : <FeatureList tab={tab} open={() => setActiveChat(true)} />}</section><section className={`content ${activeChat ? 'open' : ''}`}>{activeChat ? <Conversation messages={messages} draft={draft} setDraft={setDraft} send={() => void send()} reactTo={reactTo} close={() => setActiveChat(false)} toast={setToast} status={room.status}/> : <Dashboard tab={tab} echoAnswer={echoAnswer} setEchoAnswer={setEchoAnswer} echoSent={echoSent} submitEcho={() => { setEchoSent(true); setToast('Your response is stored locally and locked until reveal.'); }} capsule={capsule} setCapsule={setCapsule} toast={setToast}/>}</section>{settingsOpen && <GroupSettings accent={accent} setAccent={value => { setAccent(value); void saveSetting('accent', value); }} receipts={receipts} setReceipts={value => { setReceipts(value); void saveSetting('receipts', String(value)); }} groupCode={groupCode} setGroupCode={value => { setGroupCode(value); void saveSetting('group-passphrase', value); }} close={() => setSettingsOpen(false)}/>} {toast && <div role="status" className="toast">{toast}</div>}</main>;
-}
-
-function AuthScreen({ onAuthenticated }: { onAuthenticated: (session: Session) => void }) { const [mode, setMode] = useState<'login' | 'register'>('login'); const [username, setUsername] = useState(''); const [password, setPassword] = useState(''); const [displayName, setDisplayName] = useState(''); const [error, setError] = useState(''); const [loading, setLoading] = useState(false); const submit = async (event: React.FormEvent) => { event.preventDefault(); setError(''); setLoading(true); try { onAuthenticated(await authenticate(mode, { username, password, displayName })); } catch (reason) { setError(reason instanceof Error ? reason.message : 'Could not authenticate.'); } finally { setLoading(false); } }; return <main className="auth-shell"><section className="auth-card"><p className="eyebrow">COVE</p><h1>A little closer.</h1><p className="auth-copy">A private world shared between friends.</p><div className="auth-tabs"><button className={mode === 'login' ? 'active' : ''} onClick={() => setMode('login')}>Sign in</button><button className={mode === 'register' ? 'active' : ''} onClick={() => setMode('register')}>Create account</button></div><form onSubmit={submit}>{mode === 'register' && <label>Display name<input value={displayName} onChange={event => setDisplayName(event.target.value)} required maxLength={48}/></label>}<label>Username<input value={username} onChange={event => setUsername(event.target.value.toLowerCase())} required pattern="[a-z0-9_]{3,24}" autoComplete="username"/></label><label>Password<input value={password} onChange={event => setPassword(event.target.value)} required minLength={12} type="password" autoComplete={mode === 'login' ? 'current-password' : 'new-password'}/></label>{error && <p className="auth-error" role="alert">{error}</p>}<button className="primary auth-submit" disabled={loading}>{loading ? 'Please wait…' : mode === 'login' ? 'Sign in' : 'Create private account'}</button></form><small>Passwords are never stored in plaintext. Account metadata is stored only to authenticate your account; messages stay on participant devices.</small></section></main>; }
-
-function ChatList({ open }: { open: () => void }) { return <div className="chat-list"><div className="section-label"><span>CONVERSATIONS</span><button aria-label="New conversation"><Plus size={18}/></button></div>{chats.map((c, i) => <button key={c.name} className={`chat-row ${i === 0 ? 'selected' : ''}`} onClick={open}><Avatar initials={c.initials} color={c.color}/><span className="chat-copy"><b>{c.name}</b><small>{c.preview}</small></span><span className="chat-meta"><small>{c.time}</small>{c.count > 0 && <i>{c.count}</i>}</span></button>)}</div>; }
-function FeatureList({ tab, open }: { tab: Tab; open: () => void }) { const items = tab === 'moments' ? [['Echo', 'One question, revealed together', '✦'], ['Afterglow', 'A capsule for your future self', '◌']] : tab === 'memories' ? [['Starlight picnic', '12 shared moments', '✧']] : [['Sree Patnaik', 'Available · Your presence is visible to friends', 'SP']]; return <div className="feature-list">{items.map(([name, sub, icon]) => <button key={name} className="feature-row" onClick={open}><span className="feature-icon">{icon}</span><span><b>{name}</b><small>{sub}</small></span></button>)}</div>; }
-function Conversation({ messages, draft, setDraft, send, reactTo, close, toast, status }: { messages: Message[]; draft: string; setDraft: (v: string) => void; send: () => void; reactTo: (id: number) => void; close: () => void; toast: (v: string) => void; status: 'offline' | 'connecting' | 'connected' }) { return <><header className="conversation-head"><IconButton label="Back" onClick={close}><ChevronLeft size={20}/></IconButton><Avatar initials="NO" color="#7866b9"/><span><b>The Night Owls</b><small><i/> 5 members · {status === 'connected' ? 'live relay connected' : status === 'connecting' ? 'connecting…' : 'offline'}</small></span><div className="header-actions"><IconButton label="Orbit" onClick={() => toast('Orbit shows only privacy-approved presence.')}><Compass size={19}/></IconButton><IconButton label="More"><MoreHorizontal size={20}/></IconButton></div></header><div className="messages"><div className="date">TODAY</div>{messages.map(m => <div className={`message ${m.from}`} key={m.id}><div className="bubble"><p>{m.text}</p><div className="message-tools"><button aria-label="React" onClick={() => reactTo(m.id)}><Smile size={14}/></button><button aria-label="Reply" onClick={() => { setDraft(`Replying to: ${m.text.slice(0, 36)} — `); }}><Reply size={14}/></button></div></div>{m.reactions?.length ? <button className="reaction" onClick={() => reactTo(m.id)}>♡ 1</button> : null}<small>{m.time} {m.state && <><span>·</span> <em>{m.state}</em></>}</small></div>)}<div className="offline-note"><Lock size={14}/> {status === 'connected' ? 'Messages are encrypted before the live relay.' : 'Messages are saved locally; friends must be online to receive new ones.'}</div></div><form className="composer" onSubmit={e => { e.preventDefault(); send(); }}><IconButton label="Add attachment" onClick={() => toast('Media requires the forthcoming encrypted blob store.')}><Plus size={20}/></IconButton><input value={draft} onChange={e => setDraft(e.target.value)} placeholder="Message The Night Owls" aria-label="Message"/><IconButton label="Voice note" onClick={() => toast('Voice notes need media storage and peer transfer.')}><Mic size={19}/></IconButton><button className="send" aria-label="Send" type="submit"><Send size={18}/></button></form></>; }
-function GroupSettings({ accent, setAccent, receipts, setReceipts, groupCode, setGroupCode, close }: { accent: string; setAccent: (value: string) => void; receipts: boolean; setReceipts: (value: boolean) => void; groupCode: string; setGroupCode: (value: string) => void; close: () => void }) { const colours = ['#a792e5', '#75b3d8', '#83bea2', '#d98bb1']; return <div className="modal-backdrop" role="presentation"><section className="settings-sheet" role="dialog" aria-modal="true" aria-labelledby="settings-title"><header><div><p className="eyebrow">GROUP DNA</p><h2 id="settings-title">The Night Owls</h2></div><IconButton label="Close settings" onClick={close}><X size={20}/></IconButton></header><div className="setting-section"><span><Palette size={17}/> Accent colour</span><div className="swatches">{colours.map(colour => <button aria-label={`Use ${colour}`} key={colour} onClick={() => setAccent(colour)} className={accent === colour ? 'chosen' : ''} style={{ background: colour }}><Check size={14}/></button>)}</div></div><label className="setting-section code-input"><span><Lock size={17}/> Shared group code<small>Set the same private code on every friend’s device. It encrypts live messages before relay.</small></span><input type="password" value={groupCode} onChange={event => setGroupCode(event.target.value)} minLength={12} placeholder="12+ characters"/></label><label className="setting-section toggle"><span><Check size={17}/> Read receipts</span><input type="checkbox" checked={receipts} onChange={event => setReceipts(event.target.checked)}/></label><div className="setting-section muted"><span>Membership</span><b>5 trusted members</b><small>All members must share the group code out-of-band. Changing it stops new messages from decrypting on old devices.</small></div><button className="primary" onClick={close}>Done</button></section></div>; }
-function Dashboard({ tab, echoAnswer, setEchoAnswer, echoSent, submitEcho, capsule, setCapsule, toast }: { tab: Tab; echoAnswer: string; setEchoAnswer: (v: string) => void; echoSent: boolean; submitEcho: () => void; capsule: boolean; setCapsule: (v: boolean) => void; toast: (v: string) => void }) { if (tab === 'moments') return <div className="dashboard"><p className="eyebrow">SHARED MOMENTS</p><h2>Small things, held close.</h2><article className="moment echo"><div><span className="pill">ECHO · OPEN</span><h3>What’s one tiny thing that made you smile this week?</h3><p>4 of 5 responses are waiting. They reveal together tomorrow at 8:00 PM.</p></div>{echoSent ? <div className="locked"><Lock size={18}/> Response locked</div> : <><textarea value={echoAnswer} onChange={e => setEchoAnswer(e.target.value)} placeholder="Write anonymously…"/><button className="primary" onClick={submitEcho} disabled={!echoAnswer.trim()}>Submit response</button></>}</article><article className="moment afterglow"><div><span className="pill">AFTERGLOW · OPEN</span><h3>Open when we need summer again</h3><p>Unlocks in 18 days · 3 contributions</p></div><button className="ghost" onClick={() => { setCapsule(!capsule); toast(capsule ? 'Capsule contribution removed.' : 'A local draft contribution has been added.'); }}><Image size={17}/>{capsule ? 'Contribution added' : 'Add a memory'}</button></article></div>; if (tab === 'profile') return <div className="dashboard"><p className="eyebrow">PROFILE & PRIVACY</p><h2>Stay close on your terms.</h2><article className="profile-card"><Avatar initials="SP" color="#a06a99" size="large"/><h3>Sree Patnaik</h3><p>@sree · Available</p><label className="toggle"><input type="checkbox" defaultChecked onChange={e => toast(e.target.checked ? 'Presence visible to friends.' : 'Presence hidden.')} /> Share presence with friends</label><button className="ghost" onClick={() => toast('Export is available when encrypted storage is implemented.')}>Export local data</button></article></div>; return <div className="dashboard"><p className="eyebrow">YOUR PRIVATE WORLD</p><h2>A little closer.</h2><p className="lede">Your space stays useful offline. Messages created here are queued locally until a trusted peer connection exists.</p><div className="orbit"><span className="orbit-ring"/><Avatar initials="MC" color="#5273a8"/><Avatar initials="AR" color="#5e9a8c"/><Avatar initials="NO" color="#7866b9" size="large"/><Avatar initials="SJ" color="#a06a99"/></div><button className="primary" onClick={() => toast('Orbit respects each friend’s visibility preference.')}>Open Orbit</button></div>; }
+  export function App() {
+    const [session, setSession] = useState<Session | null>(savedSession);
+  
+    return (
+      <>
+        <UpdateNotification />
+  
+        {session ? (
+          <Cove
+            session={session}
+            signOut={() => {
+              sessionStorage.removeItem('cove-session');
+              setSession(null);
+            }}
+          />
+        ) : (
+          <Auth onSuccess={setSession} />
+        )}
+      </>
+    );
+  }
+function Auth({ onSuccess }: { onSuccess: (s: Session) => void }) { const [register, setRegister] = useState(false); const [name, setName] = useState(''); const [username, setUsername] = useState(''); const [password, setPassword] = useState(''); const [error, setError] = useState(''); const submit = async (e: React.FormEvent) => { e.preventDefault(); try { setError(''); onSuccess(await authenticate(register ? 'register' : 'login', { displayName: name, username, password })); } catch (x) { setError(x instanceof Error ? x.message : 'Unable to sign in.'); } }; return <main className="auth-shell"><form className="auth-card" onSubmit={submit}><p className="eyebrow">COVE</p><h1>A little closer.</h1><p className="auth-copy">A private world for your closest friends.</p>{register && <label>Display name<input value={name} onChange={e => setName(e.target.value)} required/></label>}<label>Username<input value={username} onChange={e => setUsername(e.target.value.toLowerCase())} required/></label><label>Password<input type="password" minLength={12} value={password} onChange={e => setPassword(e.target.value)} required/></label>{error && <p className="auth-error">{error}</p>}<button className="primary">{register ? 'Create account' : 'Sign in'}</button><button type="button" className="text-button" onClick={() => setRegister(!register)}>{register ? 'Already a member? Sign in' : 'New here? Create an account'}</button></form></main>; }
+function Cove({ session, signOut }: { session: Session; signOut: () => void }) { const [groups, setGroups] = useState<Group[]>([]); const [active, setActive] = useState<Group | null>(null); const [messages, setMessages] = useState<StoredMessage[]>([]); const [code, setCode] = useState(''); const [draft, setDraft] = useState(''); const [modal, setModal] = useState<'create'|'join'|'profile'|null>(null); const [notice, setNotice] = useState(''); const refresh = useCallback(async () => { try { const d = await listGroups(session); setGroups(d.groups); setActive(a => a && d.groups.find(g => g.id === a.id) || d.groups[0] || null); } catch (x) { setNotice(x instanceof Error ? x.message : 'Could not load groups.'); } }, [session]); useEffect(() => { void removeDemoData().then(refresh); }, [refresh]); useEffect(() => { if (!active) return; void loadMessages(active.id).then(setMessages); void setting(`group-code:${active.id}`, '').then(setCode); }, [active]); const receive = useCallback((m: StoredMessage) => { setMessages(x => x.some(i => i.id === m.id) ? x : [...x, m]); void saveMessage(m); }, []); const delivered = useCallback((id: string) => setMessages(x => x.map(m => m.id === Number(id) ? { ...m, state: 'Delivered' } : m)), []); const room = useRoom(session, active?.id || '', code, receive, delivered); const send = async () => { if (!active || !draft.trim()) return; if (!code) return setNotice('Set a private group code in Group settings first.'); const m: StoredMessage = { id: Date.now(), conversationId: active.id, from: 'me', text: draft.trim(), time: new Date().toLocaleTimeString([], { hour:'numeric',minute:'2-digit' }), state:'Queued' }; setMessages(x => [...x,m]); void saveMessage(m); setDraft(''); if (await room.send(m.text,String(m.id))) { const n={...m,state:'Relayed' as const}; setMessages(x=>x.map(i=>i.id===m.id?n:i)); void saveMessage(n); } }; const create=async(n:string)=>{const {group}=await createGroup(session,n);await refresh();setActive(group);setModal(null);}; const join=async(c:string)=>{const {group}=await joinGroup(session,c);await refresh();setActive(group);setModal(null);}; const remove=async()=>{if(!active||!confirm(`Delete ${active.name}?`))return;await deleteGroup(session,active.id);await refresh();}; return <main className="product"><aside className="groups"><div className="brand">cove</div><button onClick={()=>setModal('profile')} className="me">{session.user.displayName[0]}</button><div className="group-list">{groups.map(g=><button key={g.id} onClick={()=>setActive(g)} className={active?.id===g.id?'group active':'group'}><Users size={17}/><span>{g.name}</span></button>)}</div><button className="round" onClick={()=>setModal('create')}><Plus/></button><button className="round" onClick={()=>setModal('join')}><UserPlus/></button></aside><section className="panel">{active?<><header className="panel-head"><div><p className="eyebrow">PRIVATE GROUP</p><h1>{active.name}</h1><small className={room.status}>{room.status==='connected'?'● Live':'○ Offline'}</small></div><button className="icon" onClick={()=>setModal('profile')}><Settings/></button></header><div className="invite"><span>Invite code: <b>{active.inviteCode}</b></span><button onClick={()=>void navigator.clipboard.writeText(active.inviteCode).then(()=>setNotice('Invite code copied.'))}><Copy size={15}/> Copy</button></div><div className="message-list">{messages.length===0?<div className="empty"><h2>Your group is ready.</h2><p>Share the invite code, then set the same private group code with your friends.</p></div>:messages.map(m=><article className={`message ${m.from}`} key={m.id}><p>{m.text}</p><small>{m.time} · {m.state||''}</small></article>)}</div><form className="composer" onSubmit={e=>{e.preventDefault();void send();}}><input value={draft} onChange={e=>setDraft(e.target.value)} placeholder={`Message ${active.name}`}/><button className="primary"><Send size={18}/></button></form></>:<div className="empty big"><h1>Create or join a group</h1><p>There are no groups in your account yet.</p><button className="primary" onClick={()=>setModal('create')}>Create your first group</button></div>}</section>{modal&&<Modal close={()=>setModal(null)}>{modal==='create'&&<GroupForm title="Create a group" action="Create group" onSubmit={create}/>} {modal==='join'&&<GroupForm title="Join with an invite code" action="Join group" onSubmit={join}/>} {modal==='profile'&&<Profile session={session} code={code} setCode={v=>{setCode(v);if(active)void saveSetting(`group-code:${active.id}`,v);}} remove={active?remove:undefined} signOut={signOut}/>}</Modal>}{notice&&<div className="toast">{notice}<button onClick={()=>setNotice('')}><X size={14}/></button></div>}</main>; }
+function GroupForm({title,action,onSubmit}:{title:string;action:string;onSubmit:(v:string)=>Promise<void>}){const[v,setV]=useState('');const[e,setE]=useState('');return <form className="modal-card" onSubmit={async x=>{x.preventDefault();try{await onSubmit(v)}catch(r){setE(r instanceof Error?r.message:'Request failed.')}}}><h2>{title}</h2><input autoFocus value={v} onChange={x=>setV(x.target.value)} placeholder={action==='Join group'?'Invite code':'Group name'} required/>{e&&<p className="auth-error">{e}</p>}<button className="primary">{action}</button></form>}
+function Profile({session,code,setCode,remove,signOut}:{session:Session;code:string;setCode:(v:string)=>void;remove?:()=>Promise<void>;signOut:()=>void}){return <div className="modal-card"><h2>{session.user.displayName}</h2><p>@{session.user.username}</p><label>Private group code<input type="password" value={code} onChange={e=>setCode(e.target.value)} placeholder="12+ characters"/></label><small>This belongs to the currently open group, not global settings.</small>{remove&&<button className="danger" onClick={()=>void remove()}><Trash2 size={16}/>Delete current group</button>}<button className="text-button" onClick={signOut}><LogOut size={16}/>Sign out</button></div>}
+function Modal({children,close}:{children:React.ReactNode;close:()=>void}){return <div className="modal-backdrop"><button className="modal-close" onClick={close}><X/></button>{children}</div>}
