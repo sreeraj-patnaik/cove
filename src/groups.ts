@@ -5,3 +5,4 @@ export const listGroups = (session: Session) => request<{ groups: Group[] }>(ses
 export const createGroup = (session: Session, name: string) => request<{ group: Group }>(session, '/api/groups', { method: 'POST', body: JSON.stringify({ name }) });
 export const joinGroup = (session: Session, code: string) => request<{ group: Group }>(session, '/api/groups/join', { method: 'POST', body: JSON.stringify({ code }) });
 export const deleteGroup = (session: Session, id: string) => request<{ ok: true }>(session, `/api/groups/${id}`, { method: 'DELETE' });
+export const groupDetails = (session: Session, id: string) => request<{ group: Group; members: Array<{ id: string; displayName: string; username: string; avatar?: string; owner: boolean }> }>(session, `/api/groups/${id}`);
