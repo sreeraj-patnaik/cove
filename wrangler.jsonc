@@ -1,0 +1,21 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "cove",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-11-06",
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application"
+  },
+  "durable_objects": {
+    "bindings": [
+      { "name": "SIGNAL_ROOM", "class_name": "SignalRoom" },
+      { "name": "AUTH_SERVICE", "class_name": "AuthService" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["SignalRoom"] },
+    { "tag": "v2", "new_sqlite_classes": ["AuthService"] }
+  ]
+}
