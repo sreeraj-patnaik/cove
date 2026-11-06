@@ -75,7 +75,7 @@ const reply = (body: unknown, status = 200) => json(body, status);
 const validUsername = (value: string) => /^[a-z0-9_]{3,24}$/.test(value);
 async function passwordVerifier(password: string, salt: string, secret: string): Promise<string> {
   const material = await crypto.subtle.importKey('raw', encoder.encode(`${password}:${secret}`), 'PBKDF2', false, ['deriveBits']);
-  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt: decoded(salt), iterations: 310_000, hash: 'SHA-256' }, material, 256);
+  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt: decoded(salt), iterations: 100_000, hash: 'SHA-256' }, material, 256);
   return encoded(bits);
 }
 async function signedSession(account: Account, secret: string): Promise<string> {
